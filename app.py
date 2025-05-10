@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 from sentence_transformers import SentenceTransformer, util
 from io import BytesIO
+import torch
 
 # ✅ Page config FIRST
 st.set_page_config(page_title="CSI Coder using AI")
@@ -37,11 +38,11 @@ if uploaded_file:
     if st.button("🚀 Match Items to CSI Codes"):
         with st.spinner("Matching using AI..."):
             boq_descriptions = boq_df[selected_column].astype(str).tolist()
-            boq_embeddings = model.encode(boq_descriptions, convert_to_tensor=True)
+            boq_embeddings = model.encode(boq_descriptions, convert_to_tensor=True, device='cpu')
 
             reference_keywords = reference_df.iloc[:, 0].astype(str).tolist()
             reference_codes = reference_df.iloc[:, 1].astype(str).tolist()
-            ref_embeddings = model.encode(reference_keywords, convert_to_tensor=True)
+            ref_embeddings = model.encode(reference_keywords, convert_to_tensor=True, device='cpu')
 
             results = []
             for i, boq_text in enumerate(boq_descriptions):
@@ -71,4 +72,3 @@ if uploaded_file:
                 file_name="CSI_Matched_Output.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
