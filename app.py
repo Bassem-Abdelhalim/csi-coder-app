@@ -2,9 +2,9 @@
 
 import streamlit as st
 import pandas as pd
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 from io import BytesIO
-import torch
 
 # ✅ Page config FIRST
 st.set_page_config(page_title="CSI Coder using AI")
@@ -42,17 +42,20 @@ if uploaded_file:
         with st.spinner("Matching using AI..."):
             # Prepare embeddings
             boq_texts = boq_df[selected_column].astype(str).tolist()
-            boq_embeddings = model.encode(boq_texts, convert_to_tensor=True, device='cpu')
+            boq_embeddings = model.encode(boq_texts, convert_to_numpy=True)
 
-            # Reference keywords (first column) for similarity
+            # Reference keywords for similarity
             ref_keywords = reference_df.iloc[:, 0].astype(str).tolist()
-            ref_embeddings = model.encode(ref_keywords, convert_to_tensor=True, device='cpu')
+            ref_embeddings = model.encode(ref_keywords, convert_to_numpy=True)
 
             # Match and compile results
             results = []
             for idx, text in enumerate(boq_texts):
-                scores = util.cos_sim(boq_embeddings[idx], ref_embeddings)[0]
-                top_idx = scores.argmax().item()
+                # Compute cosine similarities
+                a = boq_embeddings[idx].reshape(1, -1)
+                cos_scores = cosine_similarity(a, ref_embeddings)[0]
+                top_idx = cos_scores.argmax()
+
                 # Fetch full reference row
                 ref_row = reference_df.iloc[top_idx].to_dict()
                 # Build result entry
