@@ -2,6 +2,7 @@
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from io import BytesIO
@@ -43,10 +44,15 @@ if uploaded_file:
             # Prepare embeddings
             boq_texts = boq_df[selected_column].astype(str).tolist()
             boq_embeddings = model.encode(boq_texts, convert_to_numpy=True)
+            # Ensure 2D array
+            if boq_embeddings.ndim == 1:
+                boq_embeddings = boq_embeddings.reshape(1, -1)
 
-            # Reference keywords for similarity
+            # Reference keywords and embeddings
             ref_keywords = reference_df.iloc[:, 0].astype(str).tolist()
             ref_embeddings = model.encode(ref_keywords, convert_to_numpy=True)
+            if ref_embeddings.ndim == 1:
+                ref_embeddings = ref_embeddings.reshape(1, -1)
 
             # Match and compile results
             results = []
@@ -54,11 +60,10 @@ if uploaded_file:
                 # Compute cosine similarities
                 a = boq_embeddings[idx].reshape(1, -1)
                 cos_scores = cosine_similarity(a, ref_embeddings)[0]
-                top_idx = cos_scores.argmax()
+                top_idx = int(np.argmax(cos_scores))
 
-                # Fetch full reference row
+                # Fetch full reference row and build entry
                 ref_row = reference_df.iloc[top_idx].to_dict()
-                # Build result entry
                 entry = {"BOQ Description": text}
                 entry.update(ref_row)
                 results.append(entry)
