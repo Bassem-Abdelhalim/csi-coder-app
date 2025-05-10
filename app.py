@@ -14,53 +14,61 @@ st.set_page_config(page_title="CSI Coder using AI")
 def load_reference():
     df = pd.read_excel("Master_CSI.xlsx")
     df = df.dropna()
-    df.columns = [col.strip() for col in df.columns]  # Clean column names
+    df.columns = [col.strip() for col in df.columns]
     return df
 
 reference_df = load_reference()
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 st.title("🧠 CSI Coder using AI")
-st.markdown("Upload your BOQ item list and get AI-matched CSI codes based on our internal classification reference.")
+st.markdown("Upload your BOQ item list and get AI-matched CSI codes with full reference data.")
 
 # File uploader for BOQ
 uploaded_file = st.file_uploader("📎 Upload BOQ Item List (Excel or CSV)", type=["xlsx", "csv"])
 
 if uploaded_file:
+    # Read BOQ file
     if uploaded_file.name.endswith("csv"):
         boq_df = pd.read_csv(uploaded_file)
     else:
         boq_df = pd.read_excel(uploaded_file)
 
-    boq_df.columns = [str(col) for col in boq_df.columns]  # Ensure column names are strings
-    selected_column = st.selectbox("🔽 Select the column to be coded:", boq_df.columns)
+    # Ensure column names are strings
+    boq_df.columns = [str(col) for col in boq_df.columns]
+    # Let user select which BOQ column contains descriptions
+    selected_column = st.selectbox("🔽 Select the BOQ column to code:", boq_df.columns)
 
     if st.button("🚀 Match Items to CSI Codes"):
         with st.spinner("Matching using AI..."):
-            boq_descriptions = boq_df[selected_column].astype(str).tolist()
-            boq_embeddings = model.encode(boq_descriptions, convert_to_tensor=True, device='cpu')
+            # Prepare embeddings
+            boq_texts = boq_df[selected_column].astype(str).tolist()
+            boq_embeddings = model.encode(boq_texts, convert_to_tensor=True, device='cpu')
 
-            reference_keywords = reference_df.iloc[:, 0].astype(str).tolist()
-            reference_codes = reference_df.iloc[:, 1].astype(str).tolist()
-            ref_embeddings = model.encode(reference_keywords, convert_to_tensor=True, device='cpu')
+            # Reference keywords (first column) for similarity
+            ref_keywords = reference_df.iloc[:, 0].astype(str).tolist()
+            ref_embeddings = model.encode(ref_keywords, convert_to_tensor=True, device='cpu')
 
+            # Match and compile results
             results = []
-            for i, boq_text in enumerate(boq_descriptions):
-                cosine_scores = util.cos_sim(boq_embeddings[i], ref_embeddings)[0]
-                top_idx = cosine_scores.argmax().item()
-                matched_keyword = reference_keywords[top_idx]
-                matched_code = reference_codes[top_idx]
-                results.append({
-                    "BOQ Description": boq_text,
-                    "Matched CSI Code": matched_code,
-                    "Matched Keyword": matched_keyword
-                })
+            for idx, text in enumerate(boq_texts):
+                scores = util.cos_sim(boq_embeddings[idx], ref_embeddings)[0]
+                top_idx = scores.argmax().item()
+                # Fetch full reference row
+                ref_row = reference_df.iloc[top_idx].to_dict()
+                # Build result entry
+                entry = {"BOQ Description": text}
+                entry.update(ref_row)
+                results.append(entry)
 
+            # Create DataFrame and reorder columns
             result_df = pd.DataFrame(results)
+            cols = ["BOQ Description"] + reference_df.columns.tolist()
+            result_df = result_df[cols]
+
             st.success("✅ Matching complete!")
             st.dataframe(result_df)
 
-            # Excel download
+            # Export to Excel
             output = BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 result_df.to_excel(writer, index=False, sheet_name='Matched Results')
