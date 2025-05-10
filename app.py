@@ -29,7 +29,7 @@ uploaded_file = st.file_uploader("📎 Upload BOQ Item List (Excel or CSV)", typ
 
 if uploaded_file:
     # Read BOQ file
-    if uploaded_file.name.endswith("csv"):
+    if uploaded_file.name.lower().endswith("csv"):
         boq_df = pd.read_csv(uploaded_file)
     else:
         boq_df = pd.read_excel(uploaded_file)
@@ -41,25 +41,25 @@ if uploaded_file:
 
     if st.button("🚀 Match Items to CSI Codes"):
         with st.spinner("Matching using AI..."):
-            # Prepare embeddings
+            # Prepare embeddings for BOQ items
             boq_texts = boq_df[selected_column].astype(str).tolist()
-            boq_embeddings = model.encode(boq_texts)
-            boq_embeddings = np.array(boq_embeddings)
+            boq_embeddings = model.encode(boq_texts, convert_to_numpy=True)
+            boq_embeddings = np.array(boq_embeddings, dtype=float)
             if boq_embeddings.ndim == 1:
                 boq_embeddings = boq_embeddings.reshape(1, -1)
 
-            # Reference keywords and embeddings
+            # Prepare embeddings for reference keywords
             ref_keywords = reference_df.iloc[:, 0].astype(str).tolist()
-            ref_embeddings = model.encode(ref_keywords)
-            ref_embeddings = np.array(ref_embeddings)
+            ref_embeddings = model.encode(ref_keywords, convert_to_numpy=True)
+            ref_embeddings = np.array(ref_embeddings, dtype=float)
             if ref_embeddings.ndim == 1:
                 ref_embeddings = ref_embeddings.reshape(1, -1)
 
             # Match and compile results
             results = []
             for idx, text in enumerate(boq_texts):
-                a = boq_embeddings[idx].reshape(1, -1)
-                cos_scores = cosine_similarity(a, ref_embeddings)[0]
+                emb = boq_embeddings[idx].reshape(1, -1)
+                cos_scores = cosine_similarity(emb, ref_embeddings)[0]
                 top_idx = int(np.argmax(cos_scores))
 
                 # Fetch full reference row and build entry
