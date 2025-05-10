@@ -43,21 +43,21 @@ if uploaded_file:
         with st.spinner("Matching using AI..."):
             # Prepare embeddings
             boq_texts = boq_df[selected_column].astype(str).tolist()
-            boq_embeddings = model.encode(boq_texts, convert_to_numpy=True)
-            # Ensure 2D array
+            boq_embeddings = model.encode(boq_texts)
+            boq_embeddings = np.array(boq_embeddings)
             if boq_embeddings.ndim == 1:
                 boq_embeddings = boq_embeddings.reshape(1, -1)
 
             # Reference keywords and embeddings
             ref_keywords = reference_df.iloc[:, 0].astype(str).tolist()
-            ref_embeddings = model.encode(ref_keywords, convert_to_numpy=True)
+            ref_embeddings = model.encode(ref_keywords)
+            ref_embeddings = np.array(ref_embeddings)
             if ref_embeddings.ndim == 1:
                 ref_embeddings = ref_embeddings.reshape(1, -1)
 
             # Match and compile results
             results = []
             for idx, text in enumerate(boq_texts):
-                # Compute cosine similarities
                 a = boq_embeddings[idx].reshape(1, -1)
                 cos_scores = cosine_similarity(a, ref_embeddings)[0]
                 top_idx = int(np.argmax(cos_scores))
