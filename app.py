@@ -5,6 +5,9 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer, util
 from io import BytesIO
 
+# ✅ Page config FIRST
+st.set_page_config(page_title="CSI Coder using AI")
+
 # Load the hidden CSI reference table
 @st.cache_data
 def load_reference():
@@ -16,7 +19,6 @@ def load_reference():
 reference_df = load_reference()
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
-st.set_page_config(page_title="CSI Coder using AI")
 st.title("🧠 CSI Coder using AI")
 st.markdown("Upload your BOQ item list and get AI-matched CSI codes based on our internal classification reference.")
 
@@ -69,3 +71,4 @@ if uploaded_file:
                 file_name="CSI_Matched_Output.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
