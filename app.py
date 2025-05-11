@@ -55,15 +55,14 @@ def load_reference():
 
 # Load reference data and prepare TF-IDF
 reference_df = load_reference()
-# Create combined keywords from Division Name & Section 1 Name
+# Combine Division Name, Section 1 Name, and Section 2 Name for matching criteria
 combined_kw = (
-    reference_df['Division Name'].astype(str) + " " + reference_df['Section 1 Name'].astype(str)
+    reference_df['Division Name'].astype(str) + " " +
+    reference_df['Section 1 Name'].astype(str) + " " +
+    reference_df['Section 2 Name'].astype(str)
 ).tolist()
-# Clean reference texts
-cleaned_ref = [clean_text(t) for t in combined_kw]
-# Initialize TF-IDF vectorizer on combined reference texts
+cleaned_ref = [clean_text(text) for text in combined_kw]
 vectorizer = TfidfVectorizer().fit(cleaned_ref)
-# Transform reference texts into TF-IDF vectors
 ref_tfidf = vectorizer.transform(cleaned_ref)
 
 st.title("🧠 CSI Coder using AI")
@@ -94,12 +93,10 @@ with batch_tab:
             with st.spinner("Matching using TF-IDF..."):
                 raw_texts = boq_df[selected_col].astype(str).tolist()
                 cleaned_texts = [clean_text(t) for t in raw_texts]
-                # Transform BOQ texts
                 text_tfidf = vectorizer.transform(cleaned_texts)
 
                 results = []
                 for idx, orig in enumerate(raw_texts):
-                    # Compute cosine similarity between single text and all refs
                     scores = cosine_similarity(text_tfidf[idx], ref_tfidf.toarray())[0]
                     top_idx = int(np.argmax(scores))
                     score = float(scores[top_idx])
@@ -110,6 +107,7 @@ with batch_tab:
                         confidence = 'Medium'
                     else:
                         confidence = 'Low'
+
                     ref_row = reference_df.iloc[top_idx].to_dict()
                     entry = {"BOQ Description": orig}
                     entry.update(ref_row)
@@ -152,13 +150,16 @@ with single_tab:
                     confidence = 'Medium'
                 else:
                     confidence = 'Low'
+
                 ref_row = reference_df.iloc[top_idx].to_dict()
                 entry = {"BOQ Description": input_text}
                 entry.update(ref_row)
                 entry["Confidence"] = confidence
                 result_df = pd.DataFrame([entry])
+
                 cols = ["BOQ Description"] + reference_df.columns.tolist() + ["Confidence"]
                 result_df = result_df[cols]
+
                 st.success("✅ Single item matched!")
                 st.dataframe(result_df)
 
