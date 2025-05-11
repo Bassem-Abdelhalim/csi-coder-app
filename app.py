@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
-from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from io import BytesIO
 from openpyxl import load_workbook
@@ -13,9 +13,9 @@ from openpyxl.utils import range_boundaries, get_column_letter
 # ✅ Page config FIRST
 st.set_page_config(page_title="CSI Coder using AI")
 
-# Text cleaning for consistent embeddings
+# Text cleaning for consistent matching
 def clean_text(text):
-    text = text.lower()
+    text = str(text).lower()
     text = re.sub(r"[\W_]+", " ", text)  # remove punctuation and underscores
     return text.strip()
 
@@ -53,28 +53,21 @@ def load_reference():
     df.columns = [col.strip() for col in df.columns]
     return df
 
-# Load reference data
+# Load reference data and prepare TF-IDF
 reference_df = load_reference()
-# Initialize model on CPU explicitly to avoid NotImplementedError
-model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+# Create combined keywords from Division Name & Section 1 Name
+combined_kw = (
+    reference_df['Division Name'].astype(str) + " " + reference_df['Section 1 Name'].astype(str)
+).tolist()
+# Clean reference texts
+cleaned_ref = [clean_text(t) for t in combined_kw]
+# Initialize TF-IDF vectorizer on combined reference texts
+vectorizer = TfidfVectorizer().fit(cleaned_ref)
+# Transform reference texts into TF-IDF vectors
+ref_tfidf = vectorizer.transform(cleaned_ref)
 
 st.title("🧠 CSI Coder using AI")
-st.markdown("Batch upload a BOQ file or enter a single item to get AI-matched CSI codes with full reference data.")
-
-# Precompute combined reference embeddings (Division Name + Section 1 Name)
-def get_reference_embeddings():
-    combined = (
-        reference_df['Division Name'].astype(str) + ' ' +
-        reference_df['Section 1 Name'].astype(str)
-    ).tolist()
-    cleaned = [clean_text(text) for text in combined]
-    emb = model.encode(cleaned, convert_to_numpy=True)
-    emb_arr = np.array(emb, dtype=float)
-    if emb_arr.ndim == 1:
-        emb_arr = emb_arr.reshape(1, -1)
-    return emb_arr
-
-emb_refs = get_reference_embeddings()
+st.markdown("Batch upload a BOQ file or enter a single item to get CSI codes using TF-IDF matching (fast, no torch).")
 
 batch_tab, single_tab = st.tabs(["Batch Upload","Single Item"])
 
@@ -98,22 +91,22 @@ with batch_tab:
 
         selected_col = st.selectbox("🔽 Select the BOQ column to code:", boq_df.columns)
         if st.button("🚀 Match Items to CSI Codes"):
-            with st.spinner("Matching using AI..."):
+            with st.spinner("Matching using TF-IDF..."):
                 raw_texts = boq_df[selected_col].astype(str).tolist()
                 cleaned_texts = [clean_text(t) for t in raw_texts]
-                emb_texts = model.encode(cleaned_texts, convert_to_numpy=True)
-                emb_arr = np.array(emb_texts, dtype=float)
-                if emb_arr.ndim == 1:
-                    emb_arr = emb_arr.reshape(1, -1)
+                # Transform BOQ texts
+                text_tfidf = vectorizer.transform(cleaned_texts)
 
                 results = []
                 for idx, orig in enumerate(raw_texts):
-                    scores = cosine_similarity(emb_arr[idx].reshape(1, -1), emb_refs)[0]
+                    # Compute cosine similarity between single text and all refs
+                    scores = cosine_similarity(text_tfidf[idx], ref_tfidf.toarray())[0]
                     top_idx = int(np.argmax(scores))
                     score = float(scores[top_idx])
-                    if score >= 0.75:
+                    # Determine confidence
+                    if score >= 0.5:
                         confidence = 'High'
-                    elif score >= 0.5:
+                    elif score >= 0.2:
                         confidence = 'Medium'
                     else:
                         confidence = 'Low'
@@ -147,18 +140,15 @@ with single_tab:
     input_text = st.text_input("Or enter a single BOQ item to code:")
     if st.button("🖊️ Code Single Item"):
         if input_text:
-            with st.spinner("Matching using AI..."):
+            with st.spinner("Matching using TF-IDF..."):
                 cleaned_input = clean_text(input_text)
-                emb_text = model.encode([cleaned_input], convert_to_numpy=True)
-                emb_arr = np.array(emb_text, dtype=float)
-                if emb_arr.ndim == 1:
-                    emb_arr = emb_arr.reshape(1, -1)
-                scores = cosine_similarity(emb_arr[0].reshape(1, -1), emb_refs)[0]
+                input_vec = vectorizer.transform([cleaned_input])
+                scores = cosine_similarity(input_vec, ref_tfidf.toarray())[0]
                 top_idx = int(np.argmax(scores))
                 score = float(scores[top_idx])
-                if score >= 0.75:
+                if score >= 0.5:
                     confidence = 'High'
-                elif score >= 0.5:
+                elif score >= 0.2:
                     confidence = 'Medium'
                 else:
                     confidence = 'Low'
