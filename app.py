@@ -16,29 +16,28 @@ st.set_page_config(page_title="CSI Coder using AI")
 @st.cache_data
 def load_reference():
     file_path = "Master_CSI.xlsx"
-    # Load workbook and find the table
-    wb = load_workbook(filename=file_path, read_only=True, data_only=True)
+    # Load workbook (tables available in normal mode)
+    wb = load_workbook(filename=file_path, data_only=True)
     table_name = "CSI_Integration_Tool"
+    # Find the table in any sheet
     sheet_name = None
     table_ref = None
-    for name in wb.sheetnames:
-        ws = wb[name]
+    for ws in wb.worksheets:
         if table_name in ws.tables:
-            sheet_name = name
-            table_obj = ws.tables[table_name]
-            table_ref = table_obj.ref  # e.g. 'A1:D100'
+            sheet_name = ws.title
+            table_ref = ws.tables[table_name].ref  # e.g. 'A1:D100'
             break
     if not table_ref:
         raise ValueError(f"Table '{table_name}' not found in {file_path}")
 
-    # Parse table_ref to get columns and rows
+    # Parse table_ref to boundaries
     start_col, start_row, end_col, end_row = range_boundaries(table_ref)
     start_col_letter = get_column_letter(start_col)
     end_col_letter = get_column_letter(end_col)
     usecols = f"{start_col_letter}:{end_col_letter}"
-    header_row = start_row - 1  # pandas header=index (0-based)
+    header_row = start_row - 1
 
-    # Read into DataFrame
+    # Read exactly the table into pandas
     df = pd.read_excel(
         file_path,
         sheet_name=sheet_name,
@@ -46,9 +45,7 @@ def load_reference():
         usecols=usecols,
         engine="openpyxl"
     )
-    # Limit to table rows
-    max_rows = end_row - start_row + 1
-    df = df.iloc[:max_rows]
+    df = df.iloc[: (end_row - start_row + 1)]
     df = df.dropna(how="all")
     df.columns = [col.strip() for col in df.columns]
     return df
