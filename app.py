@@ -54,8 +54,8 @@ def load_reference():
     return df
 
 reference_df = load_reference()
-# Use a stronger model for better accuracy
-model = SentenceTransformer('paraphrase-mpnet-base-v2')
+# Switch back to faster model for responsiveness
+model = SentenceTransformer('all-MiniLM-L6-v2')
 
 st.title("🧠 CSI Coder using AI")
 st.markdown("Batch upload a BOQ file or enter a single item to get AI-matched CSI codes with full reference data.")
