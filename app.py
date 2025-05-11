@@ -3,6 +3,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from io import BytesIO
@@ -11,6 +12,12 @@ from openpyxl.utils import range_boundaries, get_column_letter
 
 # ✅ Page config FIRST
 st.set_page_config(page_title="CSI Coder using AI")
+
+# Cleaning function for better embedding
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r"[\W_]+", " ", text)  # remove punctuation and underscores
+    return text.strip()
 
 # Load the hidden CSI reference table from Master_CSI.xlsx (Excel Table named CSI_Integration_Tool)
 @st.cache_data
@@ -57,7 +64,8 @@ batch_tab, single_tab = st.tabs(["Batch Upload","Single Item"])
 # Batch processing
 with batch_tab:
     uploaded_file = st.file_uploader(
-        "📎 Upload BOQ Item List (Excel or CSV)", type=["xlsx", "csv"]
+        "📎 Upload BOQ Item List (Excel or CSV)",
+        type=["xlsx", "csv"]
     )
     if uploaded_file:
         # Header auto-detection
@@ -76,26 +84,32 @@ with batch_tab:
         )
         if st.button("🚀 Match Items to CSI Codes"):
             with st.spinner("Matching using AI..."):
-                texts = boq_df[selected_column].astype(str).tolist()
+                # Clean and embed BOQ texts
+                raw_texts = boq_df[selected_column].astype(str).tolist()
+                texts = [clean_text(t) for t in raw_texts]
                 emb_texts = model.encode(texts, convert_to_numpy=True)
                 emb_texts = np.array(emb_texts, dtype=float)
                 if emb_texts.ndim == 1:
                     emb_texts = emb_texts.reshape(1, -1)
 
-                ref_keywords = reference_df.iloc[:, 0].astype(str).tolist()
-                emb_refs = model.encode(ref_keywords, convert_to_numpy=True)
+                # Clean and embed reference keywords
+                raw_keywords = reference_df.iloc[:, 0].astype(str).tolist()
+                keywords = [clean_text(k) for k in raw_keywords]
+                emb_refs = model.encode(keywords, convert_to_numpy=True)
                 emb_refs = np.array(emb_refs, dtype=float)
                 if emb_refs.ndim == 1:
                     emb_refs = emb_refs.reshape(1, -1)
 
+                # Matching
                 results = []
-                for i, txt in enumerate(texts):
+                for i, orig_text in enumerate(raw_texts):
                     sim_scores = cosine_similarity(
                         emb_texts[i].reshape(1, -1), emb_refs
                     )[0]
                     top_idx = int(np.argmax(sim_scores))
                     score = float(sim_scores[top_idx])
 
+                    # Confidence
                     if score >= 0.75:
                         confidence = 'High'
                     elif score >= 0.5:
@@ -103,8 +117,9 @@ with batch_tab:
                     else:
                         confidence = 'Low'
 
+                    # Build entry with original and reference data
                     ref_row = reference_df.iloc[top_idx].to_dict()
-                    entry = {"BOQ Description": txt}
+                    entry = {"BOQ Description": orig_text}
                     entry.update(ref_row)
                     entry["Confidence"] = confidence
                     results.append(entry)
@@ -116,6 +131,7 @@ with batch_tab:
                 st.success("✅ Matching complete with confidence levels!")
                 st.dataframe(result_df)
 
+                # Download
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     result_df.to_excel(writer, index=False, sheet_name='Matched Results')
@@ -133,20 +149,21 @@ with single_tab:
     if st.button("🖊️ Code Single Item"):
         if input_text:
             with st.spinner("Matching using AI..."):
-                texts = [input_text]
-                emb_texts = model.encode(texts, convert_to_numpy=True)
-                emb_texts = np.array(emb_texts, dtype=float)
-                if emb_texts.ndim == 1:
-                    emb_texts = emb_texts.reshape(1, -1)
+                cleaned = clean_text(input_text)
+                emb_text = model.encode([cleaned], convert_to_numpy=True)
+                emb_text = np.array(emb_text, dtype=float)
+                if emb_text.ndim == 1:
+                    emb_text = emb_text.reshape(1, -1)
 
-                ref_keywords = reference_df.iloc[:, 0].astype(str).tolist()
-                emb_refs = model.encode(ref_keywords, convert_to_numpy=True)
+                raw_keywords = reference_df.iloc[:, 0].astype(str).tolist()
+                keywords = [clean_text(k) for k in raw_keywords]
+                emb_refs = model.encode(keywords, convert_to_numpy=True)
                 emb_refs = np.array(emb_refs, dtype=float)
                 if emb_refs.ndim == 1:
                     emb_refs = emb_refs.reshape(1, -1)
 
                 sim_scores = cosine_similarity(
-                    emb_texts[0].reshape(1, -1), emb_refs
+                    emb_text[0].reshape(1, -1), emb_refs
                 )[0]
                 top_idx = int(np.argmax(sim_scores))
                 score = float(sim_scores[top_idx])
