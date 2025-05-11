@@ -2,19 +2,54 @@
 
 import streamlit as st
 import pandas as pd
-import numpy as np
+from io import BytesIO
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from io import BytesIO
+import numpy as np
+from openpyxl import load_workbook
+from openpyxl.utils import range_boundaries, get_column_letter
 
 # ✅ Page config FIRST
 st.set_page_config(page_title="CSI Coder using AI")
 
-# Load the hidden CSI reference table
+# Load the hidden CSI reference table from an Excel Table
 @st.cache_data
 def load_reference():
-    df = pd.read_excel("Master_CSI.xlsx")
-    df = df.dropna()
+    file_path = "Master_CSI.xlsx"
+    # Load workbook and find the table
+    wb = load_workbook(filename=file_path, read_only=True, data_only=True)
+    table_name = "CSI_Integration_Tool"
+    sheet_name = None
+    table_ref = None
+    for name in wb.sheetnames:
+        ws = wb[name]
+        if table_name in ws.tables:
+            sheet_name = name
+            table_obj = ws.tables[table_name]
+            table_ref = table_obj.ref  # e.g. 'A1:D100'
+            break
+    if not table_ref:
+        raise ValueError(f"Table '{table_name}' not found in {file_path}")
+
+    # Parse table_ref to get columns and rows
+    start_col, start_row, end_col, end_row = range_boundaries(table_ref)
+    start_col_letter = get_column_letter(start_col)
+    end_col_letter = get_column_letter(end_col)
+    usecols = f"{start_col_letter}:{end_col_letter}"
+    header_row = start_row - 1  # pandas header=index (0-based)
+
+    # Read into DataFrame
+    df = pd.read_excel(
+        file_path,
+        sheet_name=sheet_name,
+        header=header_row,
+        usecols=usecols,
+        engine="openpyxl"
+    )
+    # Limit to table rows
+    max_rows = end_row - start_row + 1
+    df = df.iloc[:max_rows]
+    df = df.dropna(how="all")
     df.columns = [col.strip() for col in df.columns]
     return df
 
@@ -22,53 +57,61 @@ reference_df = load_reference()
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 st.title("🧠 CSI Coder using AI")
-st.markdown("Upload your BOQ item list and get AI-matched CSI codes with full reference data.")
+st.markdown("Upload your BOQ item list and get AI-matched CSI codes with full reference data from our hidden Excel table.")
 
-# File uploader for BOQ
-uploaded_file = st.file_uploader("📎 Upload BOQ Item List (Excel or CSV)", type=["xlsx", "csv"])
+# File uploader for BOQ items
+uploaded_file = st.file_uploader(
+    "📎 Upload BOQ Item List (Excel or CSV)",
+    type=["xlsx", "csv"]
+)
 
 if uploaded_file:
-    # Read BOQ file
+    # Load user BOQ DataFrame
     if uploaded_file.name.lower().endswith("csv"):
         boq_df = pd.read_csv(uploaded_file)
     else:
         boq_df = pd.read_excel(uploaded_file)
 
     # Ensure column names are strings
-    boq_df.columns = [str(col) for col in boq_df.columns]
-    # Let user select which BOQ column contains descriptions
-    selected_column = st.selectbox("🔽 Select the BOQ column to code:", boq_df.columns)
+    boq_df.columns = [str(c) for c in boq_df.columns]
+    # User selects the description column
+    selected_column = st.selectbox(
+        "🔽 Select the BOQ column to code:",
+        boq_df.columns
+    )
 
     if st.button("🚀 Match Items to CSI Codes"):
         with st.spinner("Matching using AI..."):
-            # Prepare embeddings for BOQ items
-            boq_texts = boq_df[selected_column].astype(str).tolist()
-            boq_embeddings = model.encode(boq_texts, convert_to_numpy=True)
-            boq_embeddings = np.array(boq_embeddings, dtype=float)
-            if boq_embeddings.ndim == 1:
-                boq_embeddings = boq_embeddings.reshape(1, -1)
+            # Compute embeddings
+            texts = boq_df[selected_column].astype(str).tolist()
+            emb_texts = model.encode(texts, convert_to_numpy=True)
+            emb_texts = np.array(emb_texts, dtype=float)
+            if emb_texts.ndim == 1:
+                emb_texts = emb_texts.reshape(1, -1)
 
-            # Prepare embeddings for reference keywords
+            # Reference embeddings from table
             ref_keywords = reference_df.iloc[:, 0].astype(str).tolist()
-            ref_embeddings = model.encode(ref_keywords, convert_to_numpy=True)
-            ref_embeddings = np.array(ref_embeddings, dtype=float)
-            if ref_embeddings.ndim == 1:
-                ref_embeddings = ref_embeddings.reshape(1, -1)
+            emb_refs = model.encode(ref_keywords, convert_to_numpy=True)
+            emb_refs = np.array(emb_refs, dtype=float)
+            if emb_refs.ndim == 1:
+                emb_refs = emb_refs.reshape(1, -1)
 
-            # Match and compile results
+            # Matching
             results = []
-            for idx, text in enumerate(boq_texts):
-                emb = boq_embeddings[idx].reshape(1, -1)
-                cos_scores = cosine_similarity(emb, ref_embeddings)[0]
-                top_idx = int(np.argmax(cos_scores))
+            for i, txt in enumerate(texts):
+                sim_scores = cosine_similarity(
+                    emb_texts[i].reshape(1, -1),
+                    emb_refs
+                )[0]
+                top_idx = int(np.argmax(sim_scores))
 
-                # Fetch full reference row and build entry
+                # Build result entry with full reference row
                 ref_row = reference_df.iloc[top_idx].to_dict()
-                entry = {"BOQ Description": text}
+                entry = {"BOQ Description": txt}
                 entry.update(ref_row)
                 results.append(entry)
 
-            # Create DataFrame and reorder columns
+            # Display and download
             result_df = pd.DataFrame(results)
             cols = ["BOQ Description"] + reference_df.columns.tolist()
             result_df = result_df[cols]
@@ -76,12 +119,11 @@ if uploaded_file:
             st.success("✅ Matching complete!")
             st.dataframe(result_df)
 
-            # Export to Excel
+            # Excel download
             output = BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 result_df.to_excel(writer, index=False, sheet_name='Matched Results')
             output.seek(0)
-
             st.download_button(
                 label="⬇️ Download Matched Results as Excel",
                 data=output,
