@@ -53,38 +53,39 @@ def load_reference():
     df.columns = [col.strip() for col in df.columns]
     return df
 
-# Load reference and initialize model
+# Load reference data
 reference_df = load_reference()
-model = SentenceTransformer('all-MiniLM-L6-v2')
+# Initialize model on CPU explicitly to avoid NotImplementedError
+model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
 
 st.title("🧠 CSI Coder using AI")
 st.markdown("Batch upload a BOQ file or enter a single item to get AI-matched CSI codes with full reference data.")
 
-batch_tab, single_tab = st.tabs(["Batch Upload","Single Item"])
-
-# Function to generate embeddings for reference keywords combining two columns
+# Precompute combined reference embeddings (Division Name + Section 1 Name)
 def get_reference_embeddings():
-    # Combine Division Name and Section 1 Name
     combined = (
         reference_df['Division Name'].astype(str) + ' ' +
         reference_df['Section 1 Name'].astype(str)
     ).tolist()
-    # Clean and embed
     cleaned = [clean_text(text) for text in combined]
     emb = model.encode(cleaned, convert_to_numpy=True)
-    return np.array(emb, dtype=float)
+    emb_arr = np.array(emb, dtype=float)
+    if emb_arr.ndim == 1:
+        emb_arr = emb_arr.reshape(1, -1)
+    return emb_arr
 
-# Precompute reference embeddings once
 emb_refs = get_reference_embeddings()
 
-# Batch processing
+batch_tab, single_tab = st.tabs(["Batch Upload","Single Item"])
+
+# Batch upload tab
 with batch_tab:
     uploaded_file = st.file_uploader(
         "📎 Upload BOQ Item List (Excel or CSV)",
         type=["xlsx", "csv"]
     )
     if uploaded_file:
-        # Header auto-detection
+        # Auto-detect header row
         if uploaded_file.name.lower().endswith("csv"):
             raw_df = pd.read_csv(uploaded_file, header=None)
         else:
@@ -95,32 +96,27 @@ with batch_tab:
         boq_df = data
         boq_df.columns = headers
 
-        selected_column = st.selectbox("🔽 Select the BOQ column to code:", boq_df.columns)
+        selected_col = st.selectbox("🔽 Select the BOQ column to code:", boq_df.columns)
         if st.button("🚀 Match Items to CSI Codes"):
             with st.spinner("Matching using AI..."):
-                raw_texts = boq_df[selected_column].astype(str).tolist()
+                raw_texts = boq_df[selected_col].astype(str).tolist()
                 cleaned_texts = [clean_text(t) for t in raw_texts]
                 emb_texts = model.encode(cleaned_texts, convert_to_numpy=True)
-                emb_texts = np.array(emb_texts, dtype=float)
-                if emb_texts.ndim == 1:
-                    emb_texts = emb_texts.reshape(1, -1)
+                emb_arr = np.array(emb_texts, dtype=float)
+                if emb_arr.ndim == 1:
+                    emb_arr = emb_arr.reshape(1, -1)
 
                 results = []
-                for i, orig in enumerate(raw_texts):
-                    scores = cosine_similarity(
-                        emb_texts[i].reshape(1, -1), emb_refs
-                    )[0]
+                for idx, orig in enumerate(raw_texts):
+                    scores = cosine_similarity(emb_arr[idx].reshape(1, -1), emb_refs)[0]
                     top_idx = int(np.argmax(scores))
                     score = float(scores[top_idx])
-
-                    # Confidence label
                     if score >= 0.75:
                         confidence = 'High'
                     elif score >= 0.5:
                         confidence = 'Medium'
                     else:
                         confidence = 'Low'
-
                     ref_row = reference_df.iloc[top_idx].to_dict()
                     entry = {"BOQ Description": orig}
                     entry.update(ref_row)
@@ -146,43 +142,37 @@ with batch_tab:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
-# Single item processing
+# Single item tab
 with single_tab:
     input_text = st.text_input("Or enter a single BOQ item to code:")
     if st.button("🖊️ Code Single Item"):
         if input_text:
             with st.spinner("Matching using AI..."):
                 cleaned_input = clean_text(input_text)
-                emb_input = model.encode([cleaned_input], convert_to_numpy=True)
-                emb_input = np.array(emb_input, dtype=float)
-                if emb_input.ndim == 1:
-                    emb_input = emb_input.reshape(1, -1)
-
-                scores = cosine_similarity(
-                    emb_input[0].reshape(1, -1), emb_refs
-                )[0]
+                emb_text = model.encode([cleaned_input], convert_to_numpy=True)
+                emb_arr = np.array(emb_text, dtype=float)
+                if emb_arr.ndim == 1:
+                    emb_arr = emb_arr.reshape(1, -1)
+                scores = cosine_similarity(emb_arr[0].reshape(1, -1), emb_refs)[0]
                 top_idx = int(np.argmax(scores))
                 score = float(scores[top_idx])
-
                 if score >= 0.75:
                     confidence = 'High'
                 elif score >= 0.5:
                     confidence = 'Medium'
                 else:
                     confidence = 'Low'
-
                 ref_row = reference_df.iloc[top_idx].to_dict()
                 entry = {"BOQ Description": input_text}
                 entry.update(ref_row)
                 entry["Confidence"] = confidence
                 result_df = pd.DataFrame([entry])
-
                 cols = ["BOQ Description"] + reference_df.columns.tolist() + ["Confidence"]
                 result_df = result_df[cols]
-
                 st.success("✅ Single item matched!")
                 st.dataframe(result_df)
 
+                # Download single result
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     result_df.to_excel(writer, index=False, sheet_name='Result')
